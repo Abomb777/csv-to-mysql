@@ -12,10 +12,11 @@ TARGET_TABLE=""
 SQL_FIELDS=""
 UPDATE_FIELDS_LIST=""
 PRIM_KEYS=()
+DELETE_BY_KEYS=""
 SKIP_LOADING_URL=false
 
 # Parse arguments
-while getopts "du:c:s:q:t:f:e:k:zh?" opt; do
+while getopts "du:c:s:q:t:f:e:k:r:zh?" opt; do
   case $opt in
     d) DEBUG=true ;;
     u) URL_ARG="$OPTARG" ;;
@@ -26,11 +27,12 @@ while getopts "du:c:s:q:t:f:e:k:zh?" opt; do
     f) SQL_FIELDS="$OPTARG" ;;
     e) UPDATE_FIELDS_LIST="$OPTARG" ;;
     k) PRIM_KEYS+=("$OPTARG") ;;
+    r) DELETE_BY_KEYS="$OPTARG" ;;
     z) SKIP_LOADING_URL=true ;;
-    h|?) echo "Usage: $0 [-d] [-u URL] [-c CAST_FIELDS] [-s SKIP] [-q SQL_ARGS] [-t TARGET_TABLE] [-f SQL_FIELDS] [-e UPDATE_FIELDS] [-k PRIM_KEYS]..."; exit 0 ;;
+    h|?) echo "Usage: $0 [-d] [-u URL] [-c CAST_FIELDS] [-s SKIP] [-q SQL_ARGS] [-t TARGET_TABLE] [-f SQL_FIELDS] [-e UPDATE_FIELDS] [-k PRIM_KEYS] [-r DELETE_BY_KEYS]..."; exit 0 ;;
   esac
 done
-
+#sheet_name,type
 # Jenkins hash function
 jenkins_hash() {
   local key="$1"
@@ -95,6 +97,7 @@ echo "Skip lines (-s): $SKIP"
 echo "Sql fields (-f): $SQL_FIELDS"
 echo "Update fields (-e): $UPDATE_FIELDS_LIST"
 echo "Prim keys (-k): $(IFS=,; echo "${PRIM_KEYS[*]}")"
+echo "Remove by keys (-r): $DELETE_BY_KEYS"
 echo "Input file: $INPUT_FILE"
 echo "Output file: $OUTPUT_FILE"
 echo "================================"
@@ -237,6 +240,37 @@ SQL_FIELDS_SET=$(echo "$SQL_FIELDS" | sed "s/\([^,]*\)/\1=NULLIF(@\1,'')/g")
 SQL_FIELDS_T=$(echo "$SQL_FIELDS" | sed 's/\([^,]*\)/t.\1/g')
 UPDATE_SET=$(echo "$UPDATE_FIELDS_LIST" | sed 's/\([^,]*\)/\1 = t.\1/g')
 
+#DELETE_BY_KEYS
+#DEL_LIST_SET=$(echo "$DELETE_BY_KEYS" | sed 's/\([^,]*\)/\1 = t.\1/g')
+IFS=',' read -ra del_key_parts <<< "$DELETE_BY_KEYS"
+CAST_FIELDS_LIST=$(echo "$CAST_FIELDS" | sed 's/\]//g; s/\"//g; s/^.//')
+IFS=',' read -ra cast_key_parts <<< "$CAST_FIELDS_LIST"
+IFS=',' read -ra fields_key_parts <<< "$SQL_FIELDS"
+DEL_KEYS_VAL=""
+#for i in "${!del_key_parts[@]}"; do
+for dpart in "${del_key_parts[@]}"; do
+	echo "$dpart"
+	for k in "${!fields_key_parts[@]}"; do
+		if [[ "$dpart" == "${fields_key_parts[$k]}" ]]; then
+			echo "$k - $dpart"
+			echo "$dpart * $k ${cast_key_parts[$k]}"
+		#	if [ -n "$DEL_KEYS_VAL" ]; then
+		#	  DEL_KEYS_VAL="$DEL_KEYS_VAL AND "
+		#	fi
+			DEL_KEYS_VAL=" $DEL_KEYS_VAL  AND \`$dpart\`='${cast_key_parts[$k]}'"
+		#	for l in "${!cast_key_parts[@]}"; do
+		#	#for cpart in "${cast_key_parts[@]}"; do
+		#		echo "* $l ${cast_key_parts[$l]}"
+		#		if [[ "$dpart" == "$cpart" ]]; then
+		#			echo "_ $dpart == $cpart"
+		#		fi
+		#	done
+		fi
+	done
+done
+echo "del keys: $DEL_KEYS_VAL"
+#exit 1
+
 # Build SQL commands
 SQL_FLOW="
 CREATE TEMPORARY TABLE \`tmp_preload_${TARGET_TABLE}\` LIKE \`${TARGET_TABLE}\`;
@@ -285,7 +319,7 @@ LOAD DATA LOCAL INFILE '${CSV_FILE}'
 
 SELECT 'Loaded data size ' as status,(SELECT COUNT(1) FROM \`tmp_preload_${TARGET_TABLE}\`) as count;
 
-DELETE FROM \`${TARGET_TABLE}\` a WHERE NOT EXISTS ( SELECT 1 FROM \`tmp_preload_${TARGET_TABLE}\` t WHERE ${DELETE_KEYS} );
+DELETE FROM \`${TARGET_TABLE}\` a WHERE NOT EXISTS ( SELECT 1 FROM \`tmp_preload_${TARGET_TABLE}\` t WHERE ${DELETE_KEYS} ) $DEL_KEYS_VAL;
 
 SELECT 'Deleted rows count ' as status,(SELECT COUNT(1) FROM \`${TARGET_TABLE}\`) as count;
 
