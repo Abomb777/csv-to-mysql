@@ -260,8 +260,8 @@ END {
 }
 ' "$INPUT_FILE" > "$OUTPUT_FILE"
 
-echo "DEBUG: Output file: $OUTPUT_FILE"
-exit 1
+#echo "DEBUG: Output file: $OUTPUT_FILE"
+#exit 1
 
 # Build unique keys for SQL
 UNIQ_KEYS=""
