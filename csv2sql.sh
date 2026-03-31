@@ -121,11 +121,22 @@ fi
 
 [ "$DEBUG" = "true" ] && echo "DEBUG: Parsing CAST_FIELDS..."
 
+# Estimate total rows to process for progress display
+TOTAL_LINES=$(wc -l < "$INPUT_FILE" 2>/dev/null || echo 0)
+TOTAL_DATA_LINES=$((TOTAL_LINES - SKIP))
+if [ "$TOTAL_DATA_LINES" -lt 0 ]; then
+  TOTAL_DATA_LINES=0
+fi
+
 # Process CSV with awk
-awk -v skip="$SKIP" -v cast_fields="$CAST_FIELDS" -v debug="$DEBUG" '
+awk -v skip="$SKIP" -v cast_fields="$CAST_FIELDS" -v debug="$DEBUG" -v total_data_lines="$TOTAL_DATA_LINES" '
 BEGIN {
   FS = "\",\""
   OFS = ","
+  progress_step = 1000
+  if (debug == "true") {
+    print "DEBUG: Data processing started. Rows to process: " total_data_lines > "/dev/stderr"
+  }
   # Parse JSON-like cast_fields array
   gsub(/^\[|\]$/, "", cast_fields)
   n = split(cast_fields, rules, /,/)
@@ -163,6 +174,17 @@ function jsdate(str) {
 }
 
 NR > skip && $0 != "" {
+  processed = NR - skip
+  if (debug == "true" && (processed == 1 || processed % progress_step == 0)) {
+    if (total_data_lines > 0) {
+      pct = int((processed * 100) / total_data_lines)
+      if (pct > 100) pct = 100
+      printf("DEBUG: Processing rows... %d/%d (%d%%)\n", processed, total_data_lines, pct) > "/dev/stderr"
+    } else {
+      printf("DEBUG: Processing rows... %d\n", processed) > "/dev/stderr"
+    }
+  }
+
   # Remove leading/trailing quotes from first and last fields
   gsub(/^"/, "", $1)
   gsub(/"$/, "", $NF)
@@ -204,7 +226,21 @@ NR > skip && $0 != "" {
     print out_line
   }
 }
+
+END {
+  if (debug == "true") {
+    final_processed = (NR > skip) ? (NR - skip) : 0
+    if (total_data_lines > 0) {
+      printf("DEBUG: Data processing completed. %d/%d (100%%)\n", final_processed, total_data_lines) > "/dev/stderr"
+    } else {
+      printf("DEBUG: Data processing completed. %d rows processed\n", final_processed) > "/dev/stderr"
+    }
+  }
+}
 ' "$INPUT_FILE" > "$OUTPUT_FILE"
+
+#echo "DEBUG: Output file: $OUTPUT_FILE"
+#exit 1
 
 # Build unique keys for SQL
 UNIQ_KEYS=""
