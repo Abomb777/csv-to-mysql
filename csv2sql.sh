@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#last
 # CSV to MySQL Import Script
 # Usage: ./new_bash.sh [-d] [-u URL] [-c CAST_FIELDS] [-s SKIP] [-q SQL_ARGS] [-t TARGET_TABLE] [-f SQL_FIELDS] [-e UPDATE_FIELDS] [-k PRIM_KEYS]...
 
