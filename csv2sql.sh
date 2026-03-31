@@ -134,6 +134,7 @@ BEGIN {
   FS = "\",\""
   OFS = ","
   progress_step = 1000
+  run_time = timenow()
   if (debug == "true") {
     print "DEBUG: Data processing started. Rows to process: " total_data_lines > "/dev/stderr"
   }
@@ -142,6 +143,25 @@ BEGIN {
   n = split(cast_fields, rules, /,/)
   for (i = 1; i <= n; i++) {
     gsub(/^[ \t"]+|[ \t"]+$/, "", rules[i])
+    rule = rules[i]
+    if (rule ~ /^[0-9]+$/) {
+      rule_type[i] = "idx"
+      rule_idx[i] = int(rule)
+    } else if (rule ~ /^jsdate\([0-9]+\)$/) {
+      tmp = rule
+      gsub(/jsdate\(|\)/, "", tmp)
+      rule_type[i] = "jsdate"
+      rule_idx[i] = int(tmp)
+    } else if (rule == "cuid") {
+      rule_type[i] = "cuid"
+    } else if (rule == "timenow") {
+      rule_type[i] = "timenow"
+    } else if (rule ~ /^line\(/) {
+      rule_type[i] = "line"
+    } else {
+      rule_type[i] = "lit"
+      rule_lit[i] = rule
+    }
   }
   rule_count = n
   srand()
@@ -165,11 +185,13 @@ function timenow() {
 
 function jsdate(str) {
   if (str == "") return ""
+  if (str in jsdate_cache) return jsdate_cache[str]
   gsub(/^["'\'']+|["'\'']+$/, "", str)
   cmd = "date -d \"" str "\" \"+%Y-%m-%d\" 2>/dev/null"
   result = ""
   cmd | getline result
   close(cmd)
+  jsdate_cache[str] = result
   return result
 }
 
@@ -193,29 +215,28 @@ NR > skip && $0 != "" {
   out_line = ""
   
   for (i = 1; i <= rule_count; i++) {
-    rule = rules[i]
+    rtype = rule_type[i]
     value = ""
-    
-    if (rule ~ /^[0-9]+$/) {
+
+    if (rtype == "idx") {
       # Numeric index
-      idx = int(rule)
+      idx = rule_idx[i]
       value = $idx
       gsub(/^["'\'']+|["'\'']+$/, "", value)
       if (value ~ /[a-zA-Z0-9]/) all_empty = 0
-    } else if (rule ~ /^jsdate\(/) {
+    } else if (rtype == "jsdate") {
       # jsdate function
-      gsub(/jsdate\(|\)/, "", rule)
-      idx = int(rule)
+      idx = rule_idx[i]
       value = jsdate($idx)
-    } else if (rule == "cuid") {
+    } else if (rtype == "cuid") {
       value = cuid()
-    } else if (rule == "timenow") {
-      value = timenow()
-    } else if (rule ~ /^line\(/) {
+    } else if (rtype == "timenow") {
+      value = run_time
+    } else if (rtype == "line") {
       value = NR
     } else {
       # String literal
-      value = rule
+      value = rule_lit[i]
     }
     
     if (out_line != "") out_line = out_line ","
@@ -239,8 +260,8 @@ END {
 }
 ' "$INPUT_FILE" > "$OUTPUT_FILE"
 
-#echo "DEBUG: Output file: $OUTPUT_FILE"
-#exit 1
+echo "DEBUG: Output file: $OUTPUT_FILE"
+exit 1
 
 # Build unique keys for SQL
 UNIQ_KEYS=""
